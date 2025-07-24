@@ -1,4 +1,3 @@
-
 import requests
 import json
 import pandas as pd
@@ -11,17 +10,115 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 class MercadoLivreAdsCollector:
-    """Coletor de dados de anúncios do Mercado Livre."""
+    """Coletor de dados de anúncios e métricas do Mercado Livre."""
     
     def __init__(self, access_token):
         self.access_token = access_token
         self.base_url = "https://api.mercadolibre.com"
         self.session = requests.Session()
         self.session.headers.update({
-            "Authorization": f"Bearer {access_token}",
+            "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json"
         })
-    
+
+    def get_user_id(self):
+        """Obtém o ID do usuário logado."""
+        try:
+            url = f"{self.base_url}/users/me"
+            response = self.session.get(url)
+            response.raise_for_status()
+            data = response.json()
+            logger.info(f"ID de usuário obtido: {data.get('id')}")
+            return data.get('id')
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Erro ao obter ID do usuário: {e}")
+            return None
+
+    def get_orders_metrics(self, seller_id, date_from, date_to):
+        """Busca pedidos em um intervalo de datas e calcula as métricas de negócio."""
+        all_orders = []
+        offset = 0
+        limit = 50
+        
+        date_from_str = f"{date_from}T00:00:00.000-03:00"
+        date_to_str = f"{date_to}T23:59:59.999-03:00"
+
+        while True:
+            logger.info(f"Buscando pedidos... offset: {offset}")
+            url = f"{self.base_url}/orders/search"
+            params = {
+                "seller": seller_id,
+                "order.date_created.from": date_from_str,
+                "order.date_created.to": date_to_str,
+                "limit": limit,
+                "offset": offset,
+                "sort": "date_desc"
+            }
+            
+            try:
+                response = self.session.get(url, params=params)
+                response.raise_for_status()
+                data = response.json()
+                
+                results = data.get('results', [])
+                if not results:
+                    break
+                
+                all_orders.extend(results)
+                
+                paging = data.get('paging', {})
+                total = paging.get('total', 0)
+                
+                if offset + limit >= total or len(all_orders) >= total:
+                    break
+                
+                offset += limit
+                time.sleep(0.2)
+
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Erro ao buscar pedidos: {e}")
+                break
+        
+        logger.info(f"Total de {len(all_orders)} pedidos encontrados.")
+
+        # Calcular métricas a partir dos pedidos
+        if not all_orders:
+            return {
+                "vendas_brutas": 0, "unidades_vendidas": 0, "total_de_vendas": 0, "ticket_medio": 0,
+                "preco_medio_por_unidade": 0, "qtd_vendas_canceladas": 0, "valor_vendas_canceladas": 0
+            }
+
+        # Filtra pedidos para cálculos corretos
+        valid_orders = [
+            order for order in all_orders if order.get('status') in ['paid', 'shipped', 'delivered']
+        ]
+        cancelled_orders = [
+            order for order in all_orders if order.get('status') == 'cancelled'
+        ]
+
+        # Calcula métricas de vendas com base nos pedidos válidos
+        vendas_brutas = sum(order['total_amount'] for order in valid_orders if 'total_amount' in order)
+        unidades_vendidas = sum(item['quantity'] for order in valid_orders for item in order.get('order_items', []))
+        total_de_vendas = len(valid_orders)
+        ticket_medio = vendas_brutas / total_de_vendas if total_de_vendas > 0 else 0
+        preco_medio_por_unidade = vendas_brutas / unidades_vendidas if unidades_vendidas > 0 else 0
+        
+        # Calcula métricas de cancelamento
+        qtd_vendas_canceladas = len(cancelled_orders)
+        valor_vendas_canceladas = sum(order['total_amount'] for order in cancelled_orders if 'total_amount' in order)
+
+        metrics = {
+            "vendas_brutas": vendas_brutas,
+            "unidades_vendidas": unidades_vendidas,
+            "total_de_vendas": total_de_vendas,
+            "ticket_medio": ticket_medio,
+            "preco_medio_por_unidade": preco_medio_por_unidade,
+            "qtd_vendas_canceladas": qtd_vendas_canceladas,
+            "valor_vendas_canceladas": valor_vendas_canceladas
+        }
+        logger.info(f"Métricas de negócio calculadas: {metrics}")
+        return metrics
+
     def get_advertisers(self, product_id="PADS"):
         """Obtém a lista de anunciantes para um determinado tipo de produto."""
         try:
@@ -84,7 +181,7 @@ class MercadoLivreAdsCollector:
             if max_pages and page > max_pages:
                 break
                 
-            logger.info(f"Coletando página {page}...")
+            logger.info(f"Coletando página de campanhas {page}...")
             data = self.get_campaigns_metrics(
                 advertiser_id, date_from, date_to, 
                 metrics=metrics, limit=limit, offset=offset, filters=filters
@@ -137,11 +234,11 @@ class MercadoLivreAdsCollector:
             campaigns_list.append(campaign_info)
         
         df = pd.DataFrame(campaigns_list)
-        logger.info(f"DataFrame criado com {len(df)} campanhas e {len(df.columns)} colunas")
+        logger.info(f"DataFrame de campanhas criado com {len(df)} linhas")
         return df
 
 def run_collector(access_token, advertiser_id):
-    """Executa o coletor de dados para um anunciante específico."""
+    """Executa o coletor de dados de campanhas para um anunciante específico."""
     collector = MercadoLivreAdsCollector(access_token)
     
     end_date = datetime.now()
@@ -166,5 +263,3 @@ def run_collector(access_token, advertiser_id):
     
     df_campaigns = collector.campaigns_to_dataframe(campaigns)
     return df_campaigns
-
-
