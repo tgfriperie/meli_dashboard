@@ -5,93 +5,24 @@ from datetime import datetime
 
 # Importar módulos personalizados
 from meli_ads_collector_module import run_collector
-from data_processor_module import process_and_export, generate_summary_report, get_client_data
+from data_processor_module import process_and_export, get_client_data
+from strategy_analyzer_module import hardcoded_strategy_model_data
 
 # Configuração da página
 st.set_page_config(
     page_title="Analisador de Campanhas - Mercado Livre",
-    page_icon="📊",
+    page_icon="bar_chart",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# CSS personalizado para os cards
-st.markdown("""
-<style>
-.campaign-card {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 1.5rem;
-    border-radius: 15px;
-    margin: 1rem 0;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-    color: white;
-    border-left: 5px solid #4CAF50;
-}
-
-.campaign-card h3 {
-    color: #ffffff;
-    margin-bottom: 1rem;
-    font-size: 1.2rem;
-    font-weight: bold;
-}
-
-.strategy-badge {
-    background: rgba(255, 255, 255, 0.2);
-    padding: 0.5rem 1rem;
-    border-radius: 20px;
-    display: inline-block;
-    margin: 0.5rem 0;
-    font-weight: bold;
-}
-
-.metric-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin: 0.5rem 0;
-    padding: 0.5rem;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-}
-
-.metric-label {
-    font-weight: bold;
-    opacity: 0.9;
-}
-
-.metric-value {
-    font-size: 1.1rem;
-    font-weight: bold;
-}
-
-.investment-recommendation {
-    background: #4CAF50;
-    padding: 1rem;
-    border-radius: 10px;
-    margin-top: 1rem;
-    text-align: center;
-    font-weight: bold;
-    font-size: 1.1rem;
-}
-
-.investment-decrease {
-    background: #f44336;
-}
-
-.investment-maintain {
-    background: #ff9800;
-}
-</style>
-""", unsafe_allow_html=True)
-
 # Título principal
-st.title("📊 Analisador de Campanhas do Mercado Livre")
+st.title("Analisador de Campanhas do Mercado Livre")
 st.markdown("---")
 
-# Sidebar para configurações
-st.sidebar.header("⚙️ Configurações do Cliente")
+# --- BARRA LATERAL ---
+st.sidebar.header("Configurações do Cliente")
 
-# Inputs para dados do cliente
 access_token = st.sidebar.text_input(
     "Access Token do Mercado Livre",
     type="password",
@@ -104,251 +35,209 @@ client_name = st.sidebar.text_input(
     help="Nome identificador do cliente"
 )
 
-# Botão para validar token
-if st.sidebar.button("🔍 Validar Token"):
+if st.sidebar.button("Validar Token"):
     if access_token:
         with st.spinner("Validando token..."):
             advertiser_id, advertiser_name = get_client_data(access_token)
-            
             if advertiser_id:
-                st.sidebar.success(f"✅ Token válido!")
+                st.sidebar.success("Token válido!")
                 st.sidebar.info(f"**Anunciante:** {advertiser_name}")
                 st.sidebar.info(f"**ID:** {advertiser_id}")
-                
-                # Armazenar dados na sessão
                 st.session_state.advertiser_id = advertiser_id
                 st.session_state.advertiser_name = advertiser_name
                 st.session_state.token_valid = True
             else:
-                st.sidebar.error("❌ Token inválido ou sem anunciantes encontrados")
+                st.sidebar.error("Token inválido ou sem anunciantes encontrados")
                 st.session_state.token_valid = False
     else:
-        st.sidebar.warning("⚠️ Por favor, insira o Access Token")
+        st.sidebar.warning("Por favor, insira o Access Token")
+
+# Adiciona o filtro de status na barra lateral
+st.sidebar.divider()
+st.sidebar.header("Filtros de Análise")
+status_filter = st.sidebar.radio(
+    "Filtrar por Status da Campanha",
+    ("Todas", "Ativas", "Inativas"),
+    horizontal=True,
+    key="status_filter"
+)
+# --- FIM DA BARRA LATERAL ---
+
 
 # Função para criar cards de campanha
 def create_campaign_card(campaign_data, strategy_data):
-    """Cria um card visual para uma campanha com suas recomendações."""
-    
+    """Cria um card visual para uma campanha usando componentes nativos do Streamlit."""
     campaign_name = campaign_data.get("name", "Campanha sem nome")
     strategy_name = campaign_data.get("Estrategia_Recomendada", "Nenhuma estratégia")
+    current_acos = campaign_data.get("ACOS", 0)
+    if pd.isna(current_acos): current_acos = 0
+    current_budget = campaign_data.get("Orçamento", 0)
+    if pd.isna(current_budget): current_budget = 0
     
-    # Tratar valores nulos/NaN para ACOS e Budget
-    # Usar os nomes corretos após a consolidação
-    current_acos = campaign_data.get("ACOS", 0)  # Foi renomeado de metric_acos para ACOS
-    if pd.isna(current_acos) or current_acos is None:
-        current_acos = 0
-    
-    current_budget = campaign_data.get("Orçamento", 0)  # Foi renomeado de budget para Orçamento
-    if pd.isna(current_budget) or current_budget is None:
-        current_budget = 0
-    
-    # Buscar dados da estratégia recomendada
     strategy_acos = 0
     strategy_budget = 0
-    
     if strategy_data is not None and not strategy_data.empty:
         strategy_row = strategy_data[strategy_data["Nome"] == strategy_name]
         if not strategy_row.empty:
             strategy_acos = strategy_row.iloc[0].get("ACOS", 0)
+            if pd.isna(strategy_acos): strategy_acos = 0
             strategy_budget = strategy_row.iloc[0].get("Orçamento", 0)
+            if pd.isna(strategy_budget): strategy_budget = 0
             
-            # Tratar valores nulos da estratégia também
-            if pd.isna(strategy_acos) or strategy_acos is None:
-                strategy_acos = 0
-            if pd.isna(strategy_budget) or strategy_budget is None:
-                strategy_budget = 0
-    
-    # Calcular recomendação de investimento
     budget_diff = strategy_budget - current_budget
-    if budget_diff > 0:
-        investment_recommendation = f"💰 Aumentar investimento em R$ {budget_diff:.2f}"
-        investment_class = "investment-recommendation"
-    elif budget_diff < 0:
-        investment_recommendation = f"💸 Diminuir investimento em R$ {abs(budget_diff):.2f}"
-        investment_class = "investment-recommendation investment-decrease"
-    else:
-        investment_recommendation = "✅ Manter investimento atual"
-        investment_class = "investment-recommendation investment-maintain"
-    
-    # HTML do card
-    card_html = f"""
-    <div class="campaign-card">
-        <h3>🎯 {campaign_name}</h3>
-        
-        <div class="strategy-badge">
-            📋 Estratégia Recomendada: {strategy_name}
-        </div>
-        
-        <div class="metric-row">
-            <span class="metric-label">ACOS Atual:</span>
-            <span class="metric-value">{current_acos:.2f}%</span>
-        </div>
-        
-        <div class="metric-row">
-            <span class="metric-label">ACOS da Estratégia:</span>
-            <span class="metric-value">{strategy_acos:.2f}%</span>
-        </div>
-        
-        <div class="metric-row">
-            <span class="metric-label">Orçamento Atual:</span>
-            <span class="metric-value">R$ {current_budget:.2f}</span>
-        </div>
-        
-        <div class="metric-row">
-            <span class="metric-label">Orçamento Recomendado:</span>
-            <span class="metric-value">R$ {strategy_budget:.2f}</span>
-        </div>
-        
-        <div class="{investment_class}">
-            {investment_recommendation}
-        </div>
-    </div>
-    """
-    
-    return card_html
 
-# Área principal
+    with st.container(border=True):
+        st.subheader(f"Campanha: {campaign_name}")
+        st.markdown(f"**Estratégia Recomendada:** `{strategy_name}`")
+        st.divider()
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric(label="ACOS Atual", value=f"{current_acos:.2f}%")
+            st.metric(label="Orçamento Atual", value=f"R$ {current_budget:,.2f}")
+        with col2:
+            st.metric(label="ACOS da Estratégia", value=f"{strategy_acos:.2f}%")
+            st.metric(label="Orçamento Recomendado", value=f"R$ {strategy_budget:,.2f}")
+        st.divider()
+        if budget_diff > 0:
+            st.success(f"Aumentar investimento em R$ {budget_diff:,.2f}")
+        elif budget_diff < 0:
+            st.error(f"Diminuir investimento em R$ {abs(budget_diff):,.2f}")
+        else:
+            st.info("Manter investimento atual")
+    st.write("")
+
+# --- ÁREA PRINCIPAL ---
 col1, col2 = st.columns([2, 1])
 
+# Coluna da esquerda para executar a análise
 with col1:
-    st.header("🚀 Análise de Campanhas")
-    
+    st.header("Análise de Campanhas")
     if access_token and client_name:
-        if st.button("▶️ Executar Análise Completa", type="primary"):
+        if st.button("Executar Análise Completa", type="primary"):
             if hasattr(st.session_state, "token_valid") and st.session_state.token_valid:
-                
-                # Progress bar
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
+                progress_bar = st.progress(0, text="Iniciando análise...")
                 try:
-                    # Etapa 1: Coleta de dados
-                    status_text.text("🔄 Coletando dados das campanhas...")
-                    progress_bar.progress(25)
-                    
+                    progress_bar.progress(25, text="Coletando dados das campanhas...")
                     campaigns_df = run_collector(access_token, st.session_state.advertiser_id)
                     
                     if campaigns_df.empty:
-                        st.error("❌ Nenhuma campanha encontrada para este anunciante")
+                        st.error("Nenhuma campanha encontrada para este anunciante")
+                        progress_bar.empty()
                     else:
-                        # Etapa 2: Processamento e análise
-                        status_text.text("🧠 Analisando campanhas e recomendando estratégias...")
-                        progress_bar.progress(50)
+                        progress_bar.progress(50, text="Analisando e recomendando estratégias...")
+                        filename, consolidated_df = process_and_export(campaigns_df, client_name)
                         
-                        # Usar dados hardcoded (não precisa mais do caminho do arquivo)
-                        filename, consolidated_df = process_and_export(
-                            campaigns_df, client_name
-                        )
+                        progress_bar.progress(100, text="Análise concluída!")
+                        st.success("Análise concluída com sucesso!")
                         
-                        # Etapa 3: Geração do relatório
-                        status_text.text("📋 Gerando relatório resumo...")
-                        progress_bar.progress(75)
-                        
-                        summary = generate_summary_report(consolidated_df, client_name)
-                        
-                        # Etapa 4: Finalização
-                        status_text.text("✅ Análise concluída!")
-                        progress_bar.progress(100)
-                        
-                        # Exibir resultados
-                        st.success(f"🎉 Análise concluída com sucesso!")
-                        
-                        # Download do arquivo
                         with open(filename, "rb") as file:
                             st.download_button(
-                                label="📥 Baixar Planilha de Análise",
+                                label="Baixar Planilha de Análise",
                                 data=file.read(),
                                 file_name=filename,
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                             )
                         
-                        # Armazenar resultados na sessão
                         st.session_state.last_analysis = {
-                            "summary": summary,
                             "consolidated_df": consolidated_df,
                             "filename": filename
                         }
-                        
-                        # Limpar progress bar e status
                         progress_bar.empty()
-                        status_text.empty()
-                        
                 except Exception as e:
-                    st.error(f"❌ Erro durante a análise: {str(e)}")
-                    progress_bar.empty()
-                    status_text.empty()
+                    st.error(f"Erro durante a análise: {str(e)}")
+                    if 'progress_bar' in locals():
+                        progress_bar.empty()
             else:
-                st.warning("⚠️ Por favor, valide o token primeiro")
+                st.warning("Por favor, valide o token primeiro")
     else:
-        st.info("ℹ️ Preencha o Access Token e o Nome do Cliente na barra lateral para começar")
+        st.info("Preencha o Access Token e o Nome do Cliente na barra lateral para começar")
 
-with col2:
-    st.header("📈 Resumo da Análise")
-    
-    if hasattr(st.session_state, "last_analysis"):
-        summary = st.session_state.last_analysis["summary"]
-        
-        # Métricas principais
-        st.metric("Total de Campanhas", summary["total_campanhas"])
-        st.metric("ACOS Médio", f"{summary["acos_medio"]:.2f}%")
-        st.metric("Orçamento Total", f"R$ {summary["orcamento_total"]:,.2f}")
-        
-        # Estratégias recomendadas
-        st.subheader("🎯 Estratégias Recomendadas")
-        for strategy, count in summary["estrategias_recomendadas"].items():
-            st.write(f"• **{strategy}**: {count} campanha(s)")
-    else:
-        st.info("Execute uma análise para ver o resumo aqui")
-
-# Seção de cards de campanhas
+# Lógica de exibição dos resultados (Resumo e Cards)
 if hasattr(st.session_state, "last_analysis"):
+    full_df = st.session_state.last_analysis["consolidated_df"]
+
+    # Aplica o filtro para criar o dataframe de exibição
+    if status_filter == "Ativas":
+        display_df = full_df[full_df['status'] == 'active'].copy()
+    elif status_filter == "Inativas":
+        display_df = full_df[full_df['status'] != 'active'].copy()
+    else:
+        display_df = full_df.copy()
+
+    # Coluna da direita para o resumo
+    with col2:
+        st.header("Resumo da Análise")
+        
+        # Recalcula as métricas com base no dataframe filtrado
+        total_campaigns_display = len(display_df)
+        acos_medio_display = display_df['ACOS'].dropna().mean() if not display_df.empty else 0
+        orcamento_total_display = display_df['Orçamento'].dropna().sum() if not display_df.empty else 0
+        estrategias_recomendadas_display = display_df["Estrategia_Recomendada"].value_counts().to_dict()
+
+        st.metric(f"Total de Campanhas ({status_filter})", total_campaigns_display)
+        st.metric(f"ACOS Médio ({status_filter})", f"{acos_medio_display:.2f}%")
+        st.metric(f"Orçamento Total ({status_filter})", f"R$ {orcamento_total_display:,.2f}")
+        
+        st.subheader(f"Estratégias ({status_filter})")
+        if estrategias_recomendadas_display:
+            for strategy, count in estrategias_recomendadas_display.items():
+                st.write(f"• **{strategy}**: {count} campanha(s)")
+        else:
+            st.write("Nenhuma estratégia para a seleção atual.")
+
+    # Seção de detalhes das campanhas (abaixo das colunas)
     st.markdown("---")
-    st.header("📋 Detalhes das Campanhas")
+    st.header(f"Detalhes das Campanhas ({status_filter})")
     
-    consolidated_df = st.session_state.last_analysis["consolidated_df"]
-    
-    # Carregar dados das estratégias para comparação
-    from strategy_analyzer_module import hardcoded_strategy_model_data
     strategy_df = pd.DataFrame(hardcoded_strategy_model_data)
     
-    # Criar cards para cada campanha
-    for index, campaign in consolidated_df.iterrows():
-        card_html = create_campaign_card(campaign, strategy_df)
-        st.markdown(card_html, unsafe_allow_html=True)
+    if display_df.empty:
+        st.info(f"Nenhuma campanha encontrada com o status '{status_filter}'.")
+    else:
+        for index, campaign in display_df.iterrows():
+            create_campaign_card(campaign, strategy_df)
 
-# Seção de histórico
-st.markdown("---")
-st.header("📚 Histórico de Análises")
-
-# Listar arquivos de análise existentes
-analysis_files = [f for f in os.listdir(".") if f.endswith("_analise_campanhas_") and f.endswith(".xlsx")]
-
-if analysis_files:
-    st.write("Análises anteriores disponíveis:")
-    for file in sorted(analysis_files, reverse=True)[:5]:  # Mostrar apenas os 5 mais recentes
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.write(f"📄 {file}")
-        with col2:
-            with open(file, "rb") as f:
-                st.download_button(
-                    label="⬇️",
-                    data=f.read(),
-                    file_name=file,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=file
-                )
 else:
-    st.info("Nenhuma análise anterior encontrada")
+    # Estado inicial antes da primeira análise
+    with col2:
+        st.header("Resumo da Análise")
+        st.info("Execute uma análise para ver o resumo aqui")
+
+# Seção de histórico (sempre visível)
+st.markdown("---")
+st.header("Histórico de Análises")
+if os.path.exists("."):
+    try:
+        analysis_files = [f for f in os.listdir(".") if "_analise_campanhas_" in f and f.endswith(".xlsx")]
+        if analysis_files:
+            st.write("Análises anteriores disponíveis:")
+            for file in sorted(analysis_files, reverse=True)[:5]:
+                col1_hist, col2_hist = st.columns([3, 1])
+                with col1_hist:
+                    st.write(f"{file}")
+                with col2_hist:
+                    with open(file, "rb") as f:
+                        st.download_button(
+                            label="Baixar",
+                            data=f.read(),
+                            file_name=file,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=file
+                        )
+        else:
+            st.info("Nenhuma análise anterior encontrada.")
+    except Exception as e:
+        st.warning(f"Não foi possível listar o histórico de arquivos: {e}")
+else:
+    st.info("Diretório de trabalho não encontrado para listar o histórico.")
 
 # Footer
 st.markdown("---")
 st.markdown(
     """
-    <div style=\'text-align: center; color: #666;\'>
-        <p>Desenvolvido para análise de campanhas do Mercado Livre | Versão 1.0</p>
+    <div style='text-align: center; color: #666;'>
+        <p>Desenvolvido para análise de campanhas do Mercado Livre | Versão 1.3</p>
     </div>
     """,
     unsafe_allow_html=True
 )
-
